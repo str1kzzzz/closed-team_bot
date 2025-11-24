@@ -35,31 +35,37 @@ inline_kb = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text="Часто задаваемые вопросы", callback_data="msg3")],
 ])
 
+# Храним ID последнего сообщения для каждого пользователя
+user_last_message = {}
+
 # Обработчик команды /start
 @dp.message(Command("start"))
 async def start(message: types.Message):
     logger.info(f"Received /start from user {message.from_user.id}")
-    await message.answer("Выберите опцию:", reply_markup=inline_kb)
+    await send_or_edit_message(message.from_user.id, message.chat.id, "Выберите опцию:", inline_kb)
 
 # Обработчик callback для переходов к сообщениям
-@dp.callback_query(lambda c: c.data in ["msg1", "msg2", "msg3"])
+@dp.callback_query(lambda c: c.data in ["msg1", "msg2", "msg3", "restart"])
 async def process_callback(callback: types.CallbackQuery):
     logger.info(f"Received callback: {callback.data}")
     
-    restart_button = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Назад", callback_data="restart")]])
+    user_id = callback.from_user.id
+    chat_id = callback.message.chat.id
     
-    if callback.data == "msg1":
+    if callback.data == "restart":
+        await send_or_edit_message(user_id, chat_id, "Выберите опцию:", inline_kb)
+    
+    elif callback.data == "msg1":
         text = "💰 Тарифы на обучение\n\n1 месяц — 1000₽\n6 месяцев — 5000₽\n12 месяцев — 10000₽\nНавсегда — 15000₽\n\nВыбирай удобный формат и присоединяйся к обучению!"
-        # Отправляем новое сообщение с фото
-        await callback.message.answer_photo(IMAGE_URL, caption=text, reply_markup=restart_button)
+        restart_button = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Назад", callback_data="restart")]])
+        await send_or_edit_photo(user_id, chat_id, text, IMAGE_URL, restart_button)
     
     elif callback.data == "msg2":
         text = "💳 Готов начать обучение?\n\nВыбери удобный тариф и присоединяйся к нашему сообществу видеомейкеров!\nПосле оплаты ты получишь доступ ко всем материалам, обучающим модулям и чату с кураторами.\n\n📩 Для покупки и подключения к обучению — пиши сюда:\n👉 @Neckfee\nНачни путь в видеомонтаж уже сегодня 🎬"
-        # Отправляем новое сообщение с фото
-        await callback.message.answer_photo(IMAGE_URL, caption=text, reply_markup=restart_button)
+        restart_button = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Назад", callback_data="restart")]])
+        await send_or_edit_photo(user_id, chat_id, text, IMAGE_URL, restart_button)
     
     elif callback.data == "msg3":
-        # Для FAQ убираем фото и отправляем только текст
         text = """💡 Часто задаваемые вопросы
 
 🎓 Как будет проходить обучение?
@@ -78,26 +84,57 @@ async def process_callback(callback: types.CallbackQuery):
 Доход зависит от твоей активности и выбранного направления.
 В среднем наши выпускники зарабатывают от 50 000 до 100 000₽ в месяц на фрилансе, выполняя заказы по видеомонтажу, дизайну и анимации.
 При хорошем портфолио и постоянных клиентах доход может превышать 150 000₽ в месяц."""
-        
-        # Отправляем новое текстовое сообщение
-        await callback.message.answer(text, reply_markup=restart_button)
+        restart_button = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Назад", callback_data="restart")]])
+        await send_or_edit_message(user_id, chat_id, text, restart_button)
     
     await callback.answer()
 
-# Обработчик callback для рестарта - ИСПРАВЛЕННЫЙ
-@dp.callback_query(lambda c: c.data == "restart")
-async def restart_callback(callback: types.CallbackQuery):
-    logger.info("Received restart callback")
+# Функция для отправки или редактирования текстового сообщения
+async def send_or_edit_message(user_id, chat_id, text, reply_markup=None):
+    if user_id in user_last_message:
+        try:
+            # Пытаемся отредактировать существующее сообщение
+            message = await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=user_last_message[user_id],
+                text=text,
+                reply_markup=reply_markup
+            )
+            return message
+        except:
+            # Если не получилось редактировать, отправляем новое и удаляем старое
+            try:
+                await bot.delete_message(chat_id, user_last_message[user_id])
+            except:
+                pass
     
-    # Вместо удаления сообщения, редактируем его чтобы вернуть главное меню
-    try:
-        # Если сообщение можно редактировать (текстовое), редактируем его
-        await callback.message.edit_text("Выберите опцию:", reply_markup=inline_kb)
-    except:
-        # Если сообщение с фото или нельзя редактировать, отправляем новое сообщение
-        await callback.message.answer("Выберите опцию:", reply_markup=inline_kb)
+    # Отправляем новое сообщение
+    message = await bot.send_message(
+        chat_id=chat_id,
+        text=text,
+        reply_markup=reply_markup
+    )
+    user_last_message[user_id] = message.message_id
+    return message
+
+# Функция для отправки или редактирования сообщения с фото
+async def send_or_edit_photo(user_id, chat_id, caption, photo_url, reply_markup=None):
+    if user_id in user_last_message:
+        try:
+            # Удаляем старое сообщение
+            await bot.delete_message(chat_id, user_last_message[user_id])
+        except:
+            pass
     
-    await callback.answer()
+    # Отправляем новое сообщение с фото
+    message = await bot.send_photo(
+        chat_id=chat_id,
+        photo=photo_url,
+        caption=caption,
+        reply_markup=reply_markup
+    )
+    user_last_message[user_id] = message.message_id
+    return message
 
 # Обработчики команд меню
 @dp.message(Command("questions"))
