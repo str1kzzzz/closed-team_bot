@@ -4,6 +4,11 @@ from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiohttp import web
+import logging
+
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Замените 'YOUR_BOT_TOKEN' на ваш токен бота из @BotFather
 BOT_TOKEN = os.getenv('BOT_TOKEN') or '8498988807:AAEnH5BNh_WRcseQwgQZHtWjlTdo'
@@ -12,9 +17,12 @@ BOT_TOKEN = os.getenv('BOT_TOKEN') or '8498988807:AAEnH5BNh_WRcseQwgQZHtWjlTdo'
 IMAGE_URL = "https://ibb.co/prdQqpdy"  # Замените на ваш URL картинки
 
 # Для Render
-WEBHOOK_HOST = os.getenv('RENDER_EXTERNAL_URL')  # Автоматически устанавливается Render
+WEBHOOK_HOST = os.getenv('RENDER_EXTERNAL_URL', 'https://closed-team-bot.onrender.com')  # Используем твой URL
 WEBHOOK_PATH = '/webhook'
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
+
+# Секретный токен для вебхука (можно сгенерировать случайный)
+WEBHOOK_SECRET = os.getenv('WEBHOOK_SECRET', 'my-secret-token')
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -30,11 +38,13 @@ inline_kb = InlineKeyboardMarkup(inline_keyboard=[
 # Обработчик команды /start
 @dp.message(Command("start"))
 async def start(message: types.Message):
+    logger.info(f"Received /start from user {message.from_user.id}")
     await message.answer("Выберите опцию:", reply_markup=inline_kb)
 
 # Обработчик callback для переходов к сообщениям
 @dp.callback_query(lambda c: c.data in ["msg1", "msg2", "msg3"])
 async def process_callback(callback: types.CallbackQuery):
+    logger.info(f"Received callback: {callback.data}")
     if callback.data == "msg1":
         text = "💰 Тарифы на обучение\n\n1 месяц — 1000₽\n6 месяцев — 5000₽\n12 месяцев — 10000₽\nНавсегда — 15000₽\n\nВыбирай удобный формат и присоединяйся к обучению!"
     elif callback.data == "msg2":
@@ -48,21 +58,20 @@ async def process_callback(callback: types.CallbackQuery):
     try:
         await callback.message.delete()
     except:
-        pass  # Если не удалось удалить, продолжаем
+        pass
     
     await callback.message.answer_photo(IMAGE_URL, caption=text, reply_markup=restart_button)
     await callback.answer()
 
-# Обработчик callback для рестарта - ИСПРАВЛЕННАЯ ВЕРСИЯ
+# Обработчик callback для рестарта
 @dp.callback_query(lambda c: c.data == "restart")
 async def restart_callback(callback: types.CallbackQuery):
-    # Удаляем текущее сообщение с фото
+    logger.info("Received restart callback")
     try:
         await callback.message.delete()
     except:
-        pass  # Если не удалось удалить, продолжаем
+        pass
     
-    # Отправляем новое сообщение с меню
     await callback.message.answer("Выберите опцию:", reply_markup=inline_kb)
     await callback.answer()
 
@@ -86,8 +95,16 @@ async def subscriptions(message: types.Message):
 async def reviews(message: types.Message):
     await message.answer_photo(IMAGE_URL, caption="Ссылка на отзывы: https://t.me/+kO5zIxILayw0MjMy")
 
+# Middleware для логирования всех updates
+@dp.update.outer_middleware()
+async def log_update(handler, event, data):
+    logger.info(f"Update received: {event.update_id}")
+    return await handler(event, data)
+
 # Настройка вебхука
 async def on_startup(bot: Bot):
+    logger.info("Starting up...")
+    
     # Установка команд меню
     commands = [
         BotCommand(command="start", description="Запустить бота и показать меню"),
@@ -101,13 +118,28 @@ async def on_startup(bot: Bot):
     # Установка вебхука
     if WEBHOOK_HOST:
         webhook_url = WEBHOOK_URL
-        await bot.set_webhook(webhook_url)
-        print(f"Webhook set to: {webhook_url}")
+        await bot.set_webhook(
+            url=webhook_url,
+            secret_token=WEBHOOK_SECRET
+        )
+        logger.info(f"Webhook set to: {webhook_url}")
+    else:
+        logger.warning("WEBHOOK_HOST not set, webhook not configured")
 
 async def on_shutdown(bot: Bot):
-    # Удаление вебхука при завершении
+    logger.info("Shutting down...")
     await bot.delete_webhook()
-    print("Webhook deleted")
+    logger.info("Webhook deleted")
+
+# Создаем aiohttp приложение
+app = web.Application()
+
+# Добавляем health check endpoint
+async def health_check(request):
+    return web.Response(text="Bot is running!")
+
+app.router.add_get('/', health_check)
+app.router.add_get('/health', health_check)
 
 # Основная функция для запуска
 async def main():
@@ -115,13 +147,11 @@ async def main():
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
     
-    # Создаем aiohttp приложение
-    app = web.Application()
-    
     # Создаем обработчик вебхуков
     webhook_requests_handler = SimpleRequestHandler(
         dispatcher=dp,
         bot=bot,
+        secret_token=WEBHOOK_SECRET
     )
     
     # Регистрируем обработчик
@@ -139,7 +169,7 @@ if __name__ == "__main__":
     app = asyncio.run(main())
     
     # Определяем порт (Render сам устанавливает PORT переменную)
-    port = int(os.getenv("PORT", 5000))
+    port = int(os.getenv("PORT", 10000))
     
-    # Запускаем сервер
-    web.run_app(app, host="0.0.0.0", port=port)
+    logger.info(f"Starting server on port {port}")
+    web.run_app(app, host="0.0.0.0", port=port, access_log=logger)
