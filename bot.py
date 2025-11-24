@@ -1,13 +1,21 @@
 import os
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, BotCommand
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiohttp import web
+import ssl
 
 # Замените 'YOUR_BOT_TOKEN' на ваш токен бота из @BotFather
-BOT_TOKEN = os.getenv('BOT_TOKEN') or '8498988807:AAEnH5BNh_Wc9xLW-HRcseQwgQZHtWjlTdo'
+BOT_TOKEN = os.getenv('BOT_TOKEN') or '8498988807:AAEnH5BNh_WRcseQwgQZHtWjlTdo'
 
 # URL картинки для сообщений
 IMAGE_URL = "https://ibb.co/prdQqpdy"  # Замените на ваш URL картинки
+
+# Для Render
+WEBHOOK_HOST = os.getenv('RENDER_EXTERNAL_URL')  # Автоматически устанавливается Render
+WEBHOOK_PATH = '/webhook'
+WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -19,7 +27,6 @@ inline_kb = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text="Купить", callback_data="msg2")],
     [InlineKeyboardButton(text="Часто задаваемые вопросы", callback_data="msg3")],
 ])
-
 
 # Обработчик команды /start
 @dp.message(Command("start"))
@@ -65,8 +72,8 @@ async def subscriptions(message: types.Message):
 async def reviews(message: types.Message):
     await message.answer_photo(IMAGE_URL, caption="Ссылка на отзывы: https://t.me/+kO5zIxILayw0MjMy")
 
-# Обработчик reply keyboard
-async def main():
+# Настройка вебхука
+async def on_startup(bot: Bot):
     # Установка команд меню
     commands = [
         BotCommand(command="start", description="Запустить бота и показать меню"),
@@ -76,8 +83,49 @@ async def main():
         BotCommand(command="reviews", description="Отзывы"),
     ]
     await bot.set_my_commands(commands)
-    await dp.start_polling(bot)
+    
+    # Установка вебхука
+    if WEBHOOK_HOST:
+        webhook_url = WEBHOOK_URL
+        await bot.set_webhook(webhook_url)
+        print(f"Webhook set to: {webhook_url}")
+
+async def on_shutdown(bot: Bot):
+    # Удаление вебхука при завершении
+    await bot.delete_webhook()
+    print("Webhook deleted")
+
+# Основная функция для запуска
+async def main():
+    # Регистрируем обработчики startup/shutdown
+    dp.startup.register(on_startup)
+    dp.shutdown.register(on_shutdown)
+    
+    # Создаем aiohttp приложение
+    app = web.Application()
+    
+    # Создаем обработчик вебхуков
+    webhook_requests_handler = SimpleRequestHandler(
+        dispatcher=dp,
+        bot=bot,
+    )
+    
+    # Регистрируем обработчик
+    webhook_requests_handler.register(app, path=WEBHOOK_PATH)
+    
+    # Настраиваем приложение
+    setup_application(app, dp, bot=bot)
+    
+    return app
 
 if __name__ == "__main__":
     import asyncio
-    asyncio.run(main())
+    
+    # Запускаем сервер
+    app = asyncio.run(main())
+    
+    # Определяем порт (Render сам устанавливает PORT переменную)
+    port = int(os.getenv("PORT", 5000))
+    
+    # Запускаем сервер
+    web.run_app(app, host="0.0.0.0", port=port)
