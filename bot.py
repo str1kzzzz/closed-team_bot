@@ -25,7 +25,7 @@ print("BOT_TOKEN loaded successfully")
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-IMAGE_FILE = "image.jpg"
+IMAGE_FILE = "IMG_9582.JPG"
 
 inline_kb = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text="Отзывы", url="https://t.me/+kO5zIxILayw0MjMy")],
